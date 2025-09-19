@@ -1,24 +1,23 @@
-const db = require("../config/db.js"); // by the date of 15 sept this is the where db 
+const db = require("../config/db.js");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 const SECRET_KEY = "your_jwt_secret";
 
+// ==================== REGISTER STUDENT ====================
 const registerStudent = async (req, res) => {
-
   const { name, role, email, password, branch, currentYear, passingYear } = req.body;
 
   if (!name || !role || !email || !password || !branch || !currentYear || !passingYear) {
     return res.status(400).json({ error: "All fields are required" });
   }
 
-  if (email.split('@')[1] !== "sgsits.ac.in") {
-    return res.status(400).json({ error: "Email is not authorised " });
+  if (email.split("@")[1] !== "sgsits.ac.in") {
+    return res.status(400).json({ error: "Email is not authorised" });
   }
-
-  // email condition for checking edge cases like diploma and yearback students
-  // we have to double check the current year and passing year that if its Diploma gap should be3 s otherwise 4 yrs
-
+   // change h isme
   const validBranches = [
     "computer science",
     "information technology",
@@ -31,8 +30,8 @@ const registerStudent = async (req, res) => {
   ];
 
   function isValidBranch(branch) {
-    return validBranches.some(validBranch =>
-      new RegExp(`^${validBranch}$`, 'i').test(branch)
+    return validBranches.some((validBranch) =>
+      new RegExp(`^${validBranch}$`, "i").test(branch)
     );
   }
 
@@ -44,19 +43,19 @@ const registerStudent = async (req, res) => {
   await db("users").insert({ name, email, password: hashedPassword, role });
 
   await db("student").insert({
-      name,
-      email,
-      password: hashedPassword,
-      branch,
-      currentYear,
-      passingYear,
-      status: 'pending' 
-    });
-
+    name,
+    email,
+    password: hashedPassword,
+    branch,
+    currentYear,
+    passingYear,
+    status: "pending"
+  });
 
   res.status(201).json({ message: "User registered successfully" });
 };
 
+// ==================== LOGIN ====================
 const login = async (req, res) => {
   const { email, password } = req.body;
 
@@ -67,25 +66,38 @@ const login = async (req, res) => {
   if (!valid) return res.status(401).json({ message: "Invalid password" });
 
   const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
-    expiresIn: "1h",
+    expiresIn: "1h"
   });
 
   res.json({ token });
 };
 
+// ==================== REGISTER ALUMNI ====================
 const registerAlumni = async (req, res) => {
-
-  const { name, role, passingYear, email, password, companyEmail } = req.body;
+  const { name, role, passingYear, email, password, companyEmail, branch } = req.body;
 
   if (!name || !role || !email || !password || !companyEmail || !passingYear) {
     return res.status(400).json({ error: "All fields are required" });
   }
 
-  
+  // ✅ Enforce business/company email
+  const corporateDomains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "sgsits.ac.in"];
+
+  function isBusinessEmail(email) {
+    const domain = email.split("@")[1].toLowerCase();
+    return !corporateDomains.includes(domain);
+  }
+
+  if (!isBusinessEmail(companyEmail)) {
+    return res.status(400).json({ error: "Please use a valid business/company email ID" });
+  }
+
   try {
     const existingAlumni = await db("alumni").where({ email }).first();
     if (existingAlumni) {
-        return res.status(409).json({ error: "An account with this email already exists or is pending verification." });
+      return res
+        .status(409)
+        .json({ error: "An account with this email already exists or is pending verification." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -99,30 +111,31 @@ const registerAlumni = async (req, res) => {
       branch,
       passingYear,
       companyEmail,
-      status: 'pending' // we want that when admin confirms status will update 
-    });
-     //we wanna notify admin taht new entry has requested
-    res.status(201).json({
-      message: "Registration submitted successfully. You will receive an email once your account has been verified by an administrator."
+      status: "pending" // will update after admin approval
     });
 
+    res.status(201).json({
+      message:
+        "Registration submitted successfully. You will receive an email once your account has been verified by an administrator."
+    });
   } catch (error) {
     console.error("Alumni Registration Error:", error);
     res.status(500).json({ error: "An error occurred during registration. Please try again." });
   }
 };
 
-
+// ==================== OTP GENERATION ====================
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString(); // always 6 digits
 };
 
+// ==================== EMAIL SENDER ====================
 const sendEmail = async (to, subject, text) => {
   const transporter = nodemailer.createTransport({
     service: "Gmail",
     auth: {
-      user: process.env.EMAIL_USER, 
-      pass: process.env.EMAIL_PASS  
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
     }
   });
 
@@ -134,6 +147,7 @@ const sendEmail = async (to, subject, text) => {
   });
 };
 
+// ==================== FORGOT PASSWORD: GENERATE OTP ====================
 const forgotPasswordGenerateOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -147,9 +161,8 @@ const forgotPasswordGenerateOtp = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-   
     const otp = generateOTP();
-    const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
+    const expiryTime = new Date(Date.now() + 10 * 60 * 1000);
 
     await db("user_otps").insert({
       user_id: user.id,
@@ -170,6 +183,7 @@ const forgotPasswordGenerateOtp = async (req, res) => {
   }
 };
 
+// ==================== RESET PASSWORD WITH OTP ====================
 const resetPasswordWithOTP = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
@@ -177,7 +191,7 @@ const resetPasswordWithOTP = async (req, res) => {
     return res.status(400).json({ error: "Email, OTP, and new password are required" });
   }
 
-  try {
+  try { 
     const otpEntry = await db("password_resets")
       .where({ email, otp })
       .andWhere("expires_at", ">", new Date())
@@ -189,7 +203,6 @@ const resetPasswordWithOTP = async (req, res) => {
 
     await db("users").where({ email }).update({ password: hashedPassword });
 
-    // Delete OTP after successful reset
     await db("password_resets").where({ email, otp }).del();
 
     res.json({ message: "Password reset successful" });
@@ -199,7 +212,7 @@ const resetPasswordWithOTP = async (req, res) => {
   }
 };
 
-
+// ==================== EMAIL VERIFICATION OTP =================
 const generateEmailVerificationOTP = async (req, res) => {
   const { email } = req.body;
 
@@ -224,7 +237,7 @@ const generateEmailVerificationOTP = async (req, res) => {
   }
 };
 
-
+// ==================== VERIFY EMAIL WITH OTP ====================
 const verifyEmailWithOTP = async (req, res) => {
   const { email, otp } = req.body;
 
@@ -248,7 +261,6 @@ const verifyEmailWithOTP = async (req, res) => {
   }
 };
 
-
 module.exports = {
   registerStudent,
   login,
@@ -258,5 +270,3 @@ module.exports = {
   generateEmailVerificationOTP,
   verifyEmailWithOTP
 };
-
-
