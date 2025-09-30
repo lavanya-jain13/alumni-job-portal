@@ -1,5 +1,5 @@
 const db = require("../config/db");
-const { sendEmail } = require("../utils/emailService");
+const { sendEmail } = require("../services/emailService");
 
 // Approve Alumni + Company
 const approveAlumni = async (req, res) => {
