@@ -19,26 +19,6 @@ const registerStudent = async (req, res) => {
   // email condition for checking edge cases like diploma and yearback students
   // we have to double check the current year and passing year that if its Diploma gap should be3 s otherwise 4 yrs
 
-  const validBranches = [
-    "computer science",
-    "information technology",
-    "electronics and telecommunication",
-    "electronics and instrumentation",
-    "electrical",
-    "mechanical",
-    "civil",
-    "industrial production"
-  ];
-
-  function isValidBranch(branch) {
-    return validBranches.some(validBranch =>
-      new RegExp(`^${validBranch}$`, 'i').test(branch)
-    );
-  }
-
-  if (!isValidBranch(branch)) {
-    return res.status(400).json({ error: "Branch is incorrect" });
-  }
 
   const hashedPassword = await bcrypt.hash(password, 10);
   await db("users").insert({ name, email, password: hashedPassword, role });
