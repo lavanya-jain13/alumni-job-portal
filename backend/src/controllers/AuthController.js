@@ -16,7 +16,6 @@ const registerStudent = async (req, res) => {
       branch,
       gradYear,
       student_id,
-      user_id, // kept as per your request, though now auto-fetched
     } = req.body;
 
     if (
@@ -65,15 +64,14 @@ const registerStudent = async (req, res) => {
     // ✅ Use transaction to ensure atomicity
     await db.transaction(async (trx) => {
       // Insert user and return its generated id (UUID)
-      const [newUser] = await trx("users")
-        .insert(
-          {
-            email,
-            password_hash: hashedPassword,
-            role,
-          },
-          ["id"] // important: this returns the id (Postgres syntax)
-        );
+      const [newUser] = await trx("users").insert(
+        {
+          email,
+          password_hash: hashedPassword,
+          role,
+        },
+        ["id"] // important: this returns the id (Postgres syntax)
+      );
 
       // Insert into student_profiles with the fetched user_id
       await trx("student_profiles").insert({
@@ -162,12 +160,12 @@ const registerStudent = async (req, res) => {
 
 // // ==================== LOGIN ====================
 const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password_hash } = req.body;
 
   const user = await db("users").where({ email }).first();
   if (!user) return res.status(400).json({ message: "User not found" });
 
-  const valid = await bcrypt.compare(password, user.password);
+  const valid = await bcrypt.compare(password_hash, user.password_hash);
   if (!valid) return res.status(401).json({ message: "Invalid password" });
 
   const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
@@ -179,10 +177,17 @@ const login = async (req, res) => {
 
 // ==================== REGISTER ALUMNI ====================
 const registerAlumni = async (req, res) => {
-  const { name, role, passingYear, email, password, companyEmail, branch } =
+  const { name, role, grad_year, email, password_hash, current_title } =
     req.body;
 
-  if (!name || !role || !email || !password || !companyEmail || !passingYear) {
+  if (
+    !name ||
+    !role ||
+    !email ||
+    !password_hash ||
+    !current_title ||
+    !grad_year
+  ) {
     return res.status(400).json({ error: "All fields are required" });
   }
 
@@ -193,6 +198,9 @@ const registerAlumni = async (req, res) => {
     "outlook.com",
     "hotmail.com",
     "sgsits.ac.in",
+    "mailnator.com",
+    "tempmail.com",
+    "10minutemail.com",
   ];
 
   function isBusinessEmail(email) {
@@ -200,14 +208,14 @@ const registerAlumni = async (req, res) => {
     return !corporateDomains.includes(domain);
   }
 
-  if (!isBusinessEmail(companyEmail)) {
+  if (!isBusinessEmail(email)) {
     return res
       .status(400)
       .json({ error: "Please use a valid business/company email ID" });
   }
 
   try {
-    const existingAlumni = await db("alumni").where({ email }).first();
+    const existingAlumni = await db("users").where({ email }).first();
     if (existingAlumni) {
       return res.status(409).json({
         error:
@@ -215,18 +223,24 @@ const registerAlumni = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password_hash, 10);
+    await db.transaction(async (trx) => {
+      const [newUser] = await trx("users").insert(
+        {
+          email,
+          password_hash: hashedPassword,
+          role,
+        },
+        ["id"] // important: this returns the id (Postgres syntax)
+      );
 
-    await db("users").insert({ name, email, password: hashedPassword, role });
-
-    await db("alumni").insert({
-      name,
-      email,
-      password: hashedPassword,
-      branch,
-      passingYear,
-      companyEmail,
-      status: "pending", // will update after admin approval
+      await trx("alumni_profiles").insert({
+        name,
+        user_id: newUser.id,
+        grad_year,
+        current_title,
+        // status: "pending", // will update after admin approval
+      });
     });
 
     res.status(201).json({
