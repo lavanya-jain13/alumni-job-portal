@@ -16,7 +16,7 @@ const registerStudent = async (req, res) => {
       branch,
       gradYear,
       student_id,
-      user_id,
+      user_id, // kept as per your request, though now auto-fetched
     } = req.body;
 
     if (
@@ -25,8 +25,7 @@ const registerStudent = async (req, res) => {
       !password_hash ||
       !branch ||
       !gradYear ||
-      !student_id ||
-      !user_id
+      !student_id
     ) {
       return res.status(400).json({ error: "All fields are required" });
     }
@@ -35,7 +34,6 @@ const registerStudent = async (req, res) => {
       return res.status(400).json({ error: "Email is not authorised" });
     }
 
-    // ✅ UNCOMMENTED THIS SECTION - Essential for the function call later
     const validBranches = [
       "computer science",
       "information technology",
@@ -48,7 +46,6 @@ const registerStudent = async (req, res) => {
     ];
 
     function isValidBranch(branch) {
-      // Using a simpler and safer check
       return validBranches.includes(branch.toLowerCase().trim());
     }
 
@@ -56,7 +53,6 @@ const registerStudent = async (req, res) => {
       return res.status(400).json({ error: "Branch is incorrect" });
     }
 
-    // ✅ ADDED: Check if user already exists (Prevents 409 Conflict)
     const existingUser = await db("users").where({ email }).first();
     if (existingUser) {
       return res
@@ -66,17 +62,23 @@ const registerStudent = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password_hash, 10);
 
-    // ✅ ADDED: Transaction for atomic database operations
+    // ✅ Use transaction to ensure atomicity
     await db.transaction(async (trx) => {
-      await trx("users").insert({
-        email,
-        password_hash: hashedPassword,
-        role,
-      });
+      // Insert user and return its generated id (UUID)
+      const [newUser] = await trx("users")
+        .insert(
+          {
+            email,
+            password_hash: hashedPassword,
+            role,
+          },
+          ["id"] // important: this returns the id (Postgres syntax)
+        );
 
+      // Insert into student_profiles with the fetched user_id
       await trx("student_profiles").insert({
         name,
-        user_id,
+        user_id: newUser.id, // fetched from the previous insert
         student_id,
         branch,
         grad_year: gradYear,
