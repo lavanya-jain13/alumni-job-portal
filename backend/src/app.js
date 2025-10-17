@@ -10,6 +10,17 @@ const adminRoutes = require("./Routes/adminRoutes");
 
 const app = express();
 
+
+// const app = require("./app");
+require("dotenv").config();
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+
 // ==================== MIDDLEWARE ====================
 app.use(cors());
 app.use(bodyParser.json());

@@ -6,56 +6,159 @@ const crypto = require("crypto");
 
 const SECRET_KEY = "your_jwt_secret";
 
-// ==================== REGISTER STUDENT ====================
 const registerStudent = async (req, res) => {
-  const { name, role, email, password, branch, currentYear, passingYear } = req.body;
+  try {
+    const {
+      name,
+      role,
+      email,
+      password_hash,
+      branch,
+      gradYear,
+      student_id,
+      user_id,
+    } = req.body;
 
-  if (!name || !role || !email || !password || !branch || !currentYear || !passingYear) {
-    return res.status(400).json({ error: "All fields are required" });
+    if (
+      !name ||
+      !email ||
+      !password_hash ||
+      !branch ||
+      !gradYear ||
+      !student_id ||
+      !user_id
+    ) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    if (email.split("@")[1] !== "sgsits.ac.in") {
+      return res.status(400).json({ error: "Email is not authorised" });
+    }
+
+    // ✅ UNCOMMENTED THIS SECTION - Essential for the function call later
+    const validBranches = [
+      "computer science",
+      "information technology",
+      "electronics and telecommunication",
+      "electronics and instrumentation",
+      "electrical",
+      "mechanical",
+      "civil",
+      "industrial production",
+    ];
+
+    function isValidBranch(branch) {
+      // Using a simpler and safer check
+      return validBranches.includes(branch.toLowerCase().trim());
+    }
+
+    if (!isValidBranch(branch)) {
+      return res.status(400).json({ error: "Branch is incorrect" });
+    }
+
+    // ✅ ADDED: Check if user already exists (Prevents 409 Conflict)
+    const existingUser = await db("users").where({ email }).first();
+    if (existingUser) {
+      return res
+        .status(409)
+        .json({ error: "User with this email already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password_hash, 10);
+
+    // ✅ ADDED: Transaction for atomic database operations
+    await db.transaction(async (trx) => {
+      await trx("users").insert({
+        email,
+        password_hash: hashedPassword,
+        role,
+      });
+
+      await trx("student_profiles").insert({
+        name,
+        user_id,
+        student_id,
+        branch,
+        grad_year: gradYear,
+      });
+    });
+
+    res.status(201).json({ message: "User registered successfully" });
+  } catch (error) {
+    console.error("Student Registration Error:", error);
+    res.status(500).json({ error: "An error occurred during registration." });
   }
-
-  if (email.split("@")[1] !== "sgsits.ac.in") {
-    return res.status(400).json({ error: "Email is not authorised" });
-  }
-   // change h isme
-  const validBranches = [
-    "computer science",
-    "information technology",
-    "electronics and telecommunication",
-    "electronics and instrumentation",
-    "electrical",
-    "mechanical",
-    "civil",
-    "industrial production"
-  ];
-
-  function isValidBranch(branch) {
-    return validBranches.some((validBranch) =>
-      new RegExp(`^${validBranch}$`, "i").test(branch)
-    );
-  }
-
-  if (!isValidBranch(branch)) {
-    return res.status(400).json({ error: "Branch is incorrect" });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  await db("users").insert({ name, email, password: hashedPassword, role });
-
-  await db("student").insert({
-    name,
-    email,
-    password: hashedPassword,
-    branch,
-    currentYear,
-    passingYear,
-    status: "pending"
-  });
-
-  res.status(201).json({ message: "User registered successfully" });
 };
 
-// ==================== LOGIN ====================
+// ==================== REGISTER STUDENT ====================
+// const registerStudent = async (req, res) => {
+//   const {
+//     name,
+//     role,
+//     email,
+//     password_hash,
+//     branch,
+//     gradYear,
+//     student_id,
+//     user_id,
+//   } = req.body;
+
+//   if (
+//     !name ||
+//     !email ||
+//     !password_hash ||
+//     !branch ||
+//     !gradYear ||
+//     !student_id ||
+//     !user_id
+//   ) {
+//     return res.status(400).json({ error: "All fields are required" });
+//   }
+
+//   if (email.split("@")[1] !== "sgsits.ac.in") {
+//     return res.status(400).json({ error: "Email is not authorised" });
+//   }
+//   // change h isme
+//   const validBranches = [
+//     "computer science",
+//     "information technology",
+//     "electronics and telecommunication",
+//     "electronics and instrumentation",
+//     "electrical",
+//     "mechanical",
+//     "civil",
+//     "industrial production",
+//   ];
+
+//   function isValidBranch(branch) {
+//     return validBranches.some((validBranch) =>
+//       new RegExp(`^${validBranch}$`, "i").test(branch)
+//     );
+//   }
+
+//   if (!isValidBranch(branch)) {
+//     return res.status(400).json({ error: "Branch is incorrect" });
+//   }
+
+//   const hashedPassword = await bcrypt.hash(password_hash, 10);
+//   await db("users").insert({
+//     email,
+//     password_hash: hashedPassword,
+//     role,
+//   });
+
+//   await db("student_profiles").insert({
+//     name,
+//     user_id,
+//     student_id,
+//     branch,
+//     grad_year: gradYear,
+//   });
+
+//   res.status(201).json({ message: "User registered successfully" });
+// };
+
+// // ==================== LOGIN ====================
 const login = async (req, res) => {
   const { email, password } = req.body;
 
@@ -66,7 +169,7 @@ const login = async (req, res) => {
   if (!valid) return res.status(401).json({ message: "Invalid password" });
 
   const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
-    expiresIn: "1h"
+    expiresIn: "1h",
   });
 
   res.json({ token });
@@ -74,14 +177,21 @@ const login = async (req, res) => {
 
 // ==================== REGISTER ALUMNI ====================
 const registerAlumni = async (req, res) => {
-  const { name, role, passingYear, email, password, companyEmail, branch } = req.body;
+  const { name, role, passingYear, email, password, companyEmail, branch } =
+    req.body;
 
   if (!name || !role || !email || !password || !companyEmail || !passingYear) {
     return res.status(400).json({ error: "All fields are required" });
   }
 
   // ✅ Enforce business/company email
-  const corporateDomains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "sgsits.ac.in"];
+  const corporateDomains = [
+    "gmail.com",
+    "yahoo.com",
+    "outlook.com",
+    "hotmail.com",
+    "sgsits.ac.in",
+  ];
 
   function isBusinessEmail(email) {
     const domain = email.split("@")[1].toLowerCase();
@@ -89,15 +199,18 @@ const registerAlumni = async (req, res) => {
   }
 
   if (!isBusinessEmail(companyEmail)) {
-    return res.status(400).json({ error: "Please use a valid business/company email ID" });
+    return res
+      .status(400)
+      .json({ error: "Please use a valid business/company email ID" });
   }
 
   try {
     const existingAlumni = await db("alumni").where({ email }).first();
     if (existingAlumni) {
-      return res
-        .status(409)
-        .json({ error: "An account with this email already exists or is pending verification." });
+      return res.status(409).json({
+        error:
+          "An account with this email already exists or is pending verification.",
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -111,16 +224,18 @@ const registerAlumni = async (req, res) => {
       branch,
       passingYear,
       companyEmail,
-      status: "pending" // will update after admin approval
+      status: "pending", // will update after admin approval
     });
 
     res.status(201).json({
       message:
-        "Registration submitted successfully. You will receive an email once your account has been verified by an administrator."
+        "Registration submitted successfully. You will receive an email once your account has been verified by an administrator.",
     });
   } catch (error) {
     console.error("Alumni Registration Error:", error);
-    res.status(500).json({ error: "An error occurred during registration. Please try again." });
+    res.status(500).json({
+      error: "An error occurred during registration. Please try again.",
+    });
   }
 };
 
@@ -135,15 +250,15 @@ const sendEmail = async (to, subject, text) => {
     service: "Gmail",
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
+      pass: process.env.EMAIL_PASS,
+    },
   });
 
   await transporter.sendMail({
     from: process.env.EMAIL_USER,
     to,
     subject,
-    text
+    text,
   });
 };
 
@@ -168,14 +283,14 @@ const forgotPasswordGenerateOtp = async (req, res) => {
       user_id: user.id,
       otp,
       purpose: "forgot_password",
-      expires_at: expiryTime
+      expires_at: expiryTime,
     });
 
     await sendEmail(user.email, "Password Reset OTP", `Your OTP is: ${otp}`);
 
     res.status(200).json({
       message: "OTP sent successfully to registered email",
-      expiry: expiryTime
+      expiry: expiryTime,
     });
   } catch (error) {
     console.error("Forgot Password Error:", error);
@@ -188,16 +303,19 @@ const resetPasswordWithOTP = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
   if (!email || !otp || !newPassword) {
-    return res.status(400).json({ error: "Email, OTP, and new password are required" });
+    return res
+      .status(400)
+      .json({ error: "Email, OTP, and new password are required" });
   }
 
-  try { 
+  try {
     const otpEntry = await db("password_resets")
       .where({ email, otp })
       .andWhere("expires_at", ">", new Date())
       .first();
 
-    if (!otpEntry) return res.status(400).json({ error: "Invalid or expired OTP" });
+    if (!otpEntry)
+      return res.status(400).json({ error: "Invalid or expired OTP" });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
@@ -225,10 +343,14 @@ const generateEmailVerificationOTP = async (req, res) => {
     await db("email_verifications").insert({
       email,
       otp,
-      expires_at: expiresAt
+      expires_at: expiresAt,
     });
 
-    await sendEmail(email, "Email Verification OTP", `Your verification OTP is: ${otp}`);
+    await sendEmail(
+      email,
+      "Email Verification OTP",
+      `Your verification OTP is: ${otp}`
+    );
 
     res.json({ message: "Verification OTP sent to email." });
   } catch (error) {
@@ -241,7 +363,8 @@ const generateEmailVerificationOTP = async (req, res) => {
 const verifyEmailWithOTP = async (req, res) => {
   const { email, otp } = req.body;
 
-  if (!email || !otp) return res.status(400).json({ error: "Email and OTP are required" });
+  if (!email || !otp)
+    return res.status(400).json({ error: "Email and OTP are required" });
 
   try {
     const otpEntry = await db("email_verifications")
@@ -249,7 +372,8 @@ const verifyEmailWithOTP = async (req, res) => {
       .andWhere("expires_at", ">", new Date())
       .first();
 
-    if (!otpEntry) return res.status(400).json({ error: "Invalid or expired OTP" });
+    if (!otpEntry)
+      return res.status(400).json({ error: "Invalid or expired OTP" });
 
     await db("users").where({ email }).update({ email_verified: true });
     await db("email_verifications").where({ email, otp }).del();
@@ -268,5 +392,5 @@ module.exports = {
   forgotPasswordGenerateOtp,
   resetPasswordWithOTP,
   generateEmailVerificationOTP,
-  verifyEmailWithOTP
+  verifyEmailWithOTP,
 };
