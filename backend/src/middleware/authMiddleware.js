@@ -7,7 +7,8 @@ const authenticate = (req, res, next) => {
   if (!token) return res.status(401).json({ error: "No token provided" });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // 👇 use the same secret string you used in the controller
+    const decoded = jwt.verify(token, "your_jwt_secret");
     req.user = decoded;
     next();
   } catch (err) {
