@@ -8,15 +8,8 @@ const SECRET_KEY = "your_jwt_secret";
 
 const registerStudent = async (req, res) => {
   try {
-    const {
-      name,
-      role,
-      email,
-      password_hash,
-      branch,
-      gradYear,
-      student_id,
-    } = req.body;
+    const { name, role, email, password_hash, branch, gradYear, student_id } =
+      req.body;
 
     if (
       !name ||
@@ -234,12 +227,20 @@ const registerAlumni = async (req, res) => {
         ["id"] // important: this returns the id (Postgres syntax)
       );
 
-      await trx("alumni_profiles").insert({
-        name,
+      const [newAlumni] = await trx("alumni_profiles").insert(
+        {
+          name,
+          user_id: newUser.id,
+          grad_year,
+          current_title,
+          // status: "pending", // will update after admin approval
+        },
+        ["id"]
+      );
+
+      await trx("companies").insert({
+        alumni_id: newAlumni.id,
         user_id: newUser.id,
-        grad_year,
-        current_title,
-        // status: "pending", // will update after admin approval
       });
     });
 
@@ -265,13 +266,13 @@ const sendEmail = async (to, subject, text) => {
   const transporter = nodemailer.createTransport({
     service: "Gmail",
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
+      user: "deepslava13@gmail.com",
+      pass: "hkmh eyon tikk yzpb",
     },
   });
 
   await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+    from: "deepslava13@gmail.com",
     to,
     subject,
     text,
@@ -279,6 +280,7 @@ const sendEmail = async (to, subject, text) => {
 };
 
 // ==================== FORGOT PASSWORD: GENERATE OTP ====================
+
 const forgotPasswordGenerateOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -292,29 +294,44 @@ const forgotPasswordGenerateOtp = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const otp = generateOTP();
-    const expiryTime = new Date(Date.now() + 10 * 60 * 1000);
+    const otp = generateOTP(); // a 6-digit string
+    const expiryTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    await db("user_otps").insert({
-      user_id: user.id,
+    console.log(otp + "????????LLLLL");
+
+    await db("otp_verifications").where({ email: user.email }).del();
+
+    //Insert OTP record
+    await db("otp_verifications").insert({
+      email: user.email,
       otp,
-      purpose: "forgot_password",
       expires_at: expiryTime,
     });
+    console.log(user.email + "????????LLLLL");
 
-    await sendEmail(user.email, "Password Reset OTP", `Your OTP is: ${otp}`);
+    try {
+      await sendEmail(email, "Password Reset OTP", `Your OTP is: ${otp}`);
+    } catch (err) {
+      console.error("Email send error:", {
+        code: err.code,
+        command: err.command,
+        response: err.response,
+      });
+      return res.status(502).json({ error: "Failed to send email" });
+    }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "OTP sent successfully to registered email",
       expiry: expiryTime,
     });
   } catch (error) {
     console.error("Forgot Password Error:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
-// ==================== RESET PASSWORD WITH OTP ====================
+// // ==================== RESET PASSWORD WITH OTP ====================
+
 const resetPasswordWithOTP = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
@@ -325,7 +342,7 @@ const resetPasswordWithOTP = async (req, res) => {
   }
 
   try {
-    const otpEntry = await db("password_resets")
+    const otpEntry = await db("otp_verifications")
       .where({ email, otp })
       .andWhere("expires_at", ">", new Date())
       .first();
@@ -335,9 +352,11 @@ const resetPasswordWithOTP = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await db("users").where({ email }).update({ password: hashedPassword });
+    await db("users")
+      .where({ email })
+      .update({ password_hash: hashedPassword });
 
-    await db("password_resets").where({ email, otp }).del();
+    await db("otp_verifications").where({ email, otp }).del();
 
     res.json({ message: "Password reset successful" });
   } catch (error) {
@@ -353,10 +372,12 @@ const generateEmailVerificationOTP = async (req, res) => {
   if (!email) return res.status(400).json({ error: "Email is required" });
 
   try {
-    const otp = crypto.randomInt(100000, 999999).toString();
+    const otp = generateOTP();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    await db("email_verifications").insert({
+    console.log(otp + "????????LLLLL");
+
+    await db("otp_verifications").insert({
       email,
       otp,
       expires_at: expiresAt,
@@ -368,10 +389,10 @@ const generateEmailVerificationOTP = async (req, res) => {
       `Your verification OTP is: ${otp}`
     );
 
-    res.json({ message: "Verification OTP sent to email." });
+    return res.json({ message: "Verification OTP sent to email." });
   } catch (error) {
     console.error("Email Verification OTP Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -383,7 +404,7 @@ const verifyEmailWithOTP = async (req, res) => {
     return res.status(400).json({ error: "Email and OTP are required" });
 
   try {
-    const otpEntry = await db("email_verifications")
+    const otpEntry = await db("otp_verifications")
       .where({ email, otp })
       .andWhere("expires_at", ">", new Date())
       .first();
@@ -391,15 +412,17 @@ const verifyEmailWithOTP = async (req, res) => {
     if (!otpEntry)
       return res.status(400).json({ error: "Invalid or expired OTP" });
 
-    await db("users").where({ email }).update({ email_verified: true });
-    await db("email_verifications").where({ email, otp }).del();
+    await db("users").where({ email }).update({ is_verified: true });
+    await db("otp_verifications").where({ email, otp }).del();
 
-    res.json({ message: "Email verified successfully" });
+    return res.json({ message: "Email verified successfully" });
   } catch (error) {
     console.error("Email Verification Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+//we need to make an api for logout too
 
 module.exports = {
   registerStudent,
