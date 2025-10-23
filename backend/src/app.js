@@ -1,3 +1,18 @@
+// Hardcoded environment variables (no .env file needed)
+process.env.PORT = 5000;
+process.env.DB_HOST = "localhost";
+process.env.DB_PORT = "5432";
+process.env.DB_USER = "postgres";
+process.env.DB_PASSWORD = "lavanyaa@1";
+process.env.DB_NAME = "alumni_portal";
+
+process.env.JWT_SECRET = "your_jwt_secret"; // must match authMiddleware secret
+
+process.env.EMAIL_HOST = "smtp.gmail.com";
+process.env.EMAIL_PORT = "587";
+process.env.EMAIL_USER = "deepslava13@gmail.com";
+process.env.EMAIL_PASS = "hkmheyontikkyzpb"; // app password (no spaces)
+
 const express = require("express");
 const app = express();
 const cors = require("cors");
@@ -41,21 +56,5 @@ app.use((err, req, res, next) => {
   console.error("❌ Server Error:", err.stack);
   res.status(500).json({ error: "Internal server error" });
 });
-
-
-// Hardcoded environment variables (no .env file needed)
-process.env.PORT = 5000;
-process.env.DB_HOST = "localhost";
-process.env.DB_PORT = "5432";
-process.env.DB_USER = "postgres";
-process.env.DB_PASSWORD = "lavanyaa@1";
-process.env.DB_NAME = "alumni_portal";
-
-process.env.JWT_SECRET = "your_jwt_secret"; // must match authMiddleware secret
-
-process.env.EMAIL_HOST = "smtp.gmail.com";
-process.env.EMAIL_PORT = "587";
-process.env.EMAIL_USER = "deepslava13@gmail.com";
-process.env.EMAIL_PASS = "hkmheyontikkyzpb"; // app password (no spaces)
 
 module.exports = app;

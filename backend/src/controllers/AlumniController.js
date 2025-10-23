@@ -74,7 +74,15 @@ const postJob = async (req, res) => {
 
     // 2) Company for that alumni (companies PK = alumni_id)
     const company = await db("companies")
-      .select("alumni_id", "document_url", "about", "name", "website", "status")
+      .select(
+        "id",
+        "alumni_id",
+        "document_url",
+        "about",
+        "name",
+        "website",
+        "status"
+      )
       .where({ alumni_id: profile.id })
       .first();
 
@@ -112,7 +120,7 @@ const postJob = async (req, res) => {
 
     // 5) Insert job
     await db("jobs").insert({
-      company_id: profile.id, // ✅ references companies.alumni_id
+      company_id: company.id, // ✅ references companies.alumni_id
       posted_by_alumni_id: profile.id, // ✅ references alumni_profiles.id
       job_title,
       job_description,
@@ -138,5 +146,4 @@ const updateProfile = async (req, res) => {
 
 module.exports = { completeProfile, postJob, updateProfile };
 
-
-// branchwise email, 
+// branchwise email,
