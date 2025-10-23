@@ -197,6 +197,5 @@ const changePassword = async (req, res) => {
 
 module.exports = {
   forgotPassword,
-  resetPassword,
   changePassword,
 };

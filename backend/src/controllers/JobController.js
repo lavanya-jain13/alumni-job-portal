@@ -39,3 +39,5 @@ exports.deleteJob = asyncHandler(async (req, res) => {
   }
   res.json({ message: "Job removed" });
 });
+
+
