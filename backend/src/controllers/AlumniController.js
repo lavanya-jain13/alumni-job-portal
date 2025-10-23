@@ -107,6 +107,9 @@ const postJob = async (req, res) => {
         .json({ error: "job_title and job_description are required." });
     }
 
+    const role = req.user?.role || roleToAssign;
+    console.log("USEr ROLE:", role);
+
     // 5) Insert job
     await db("jobs").insert({
       company_id: profile.id, // ✅ references companies.alumni_id
@@ -134,3 +137,6 @@ const updateProfile = async (req, res) => {
 };
 
 module.exports = { completeProfile, postJob, updateProfile };
+
+
+// branchwise email, 

@@ -161,9 +161,15 @@ const login = async (req, res) => {
   const valid = await bcrypt.compare(password_hash, user.password_hash);
   if (!valid) return res.status(401).json({ message: "Invalid password" });
 
-  const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
-    expiresIn: "1h",
-  });
+  const roleToAssign = user.role.toLowerCase();
+
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: roleToAssign },
+    SECRET_KEY,
+    {
+      expiresIn: "1h",
+    }
+  );
 
   res.json({ token });
 };
@@ -385,8 +391,8 @@ const generateEmailVerificationOTP = async (req, res) => {
 
     await sendEmail(
       email,
-      "Email Verification OTP",
-      `Your verification OTP is: ${otp}`
+      "<h1>Email Verification OTP,</h1>",
+      `<h2>Your verification OTP is: ${otp}</h2>`
     );
 
     return res.json({ message: "Verification OTP sent to email." });

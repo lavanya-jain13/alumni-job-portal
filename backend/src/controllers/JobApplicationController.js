@@ -49,3 +49,6 @@ exports.viewApplicants = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+// view application ststus, no of applicants reached 
+

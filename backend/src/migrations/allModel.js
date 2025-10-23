@@ -94,6 +94,7 @@ exports.up = function (knex) {
         .inTable("users")
         .onDelete("CASCADE");
       table.text("resume_url");
+      table.integer("No_of_applicants").defaultTo(0);
       table.timestamp("applied_at").defaultTo(knex.fn.now());
       table.primary(["job_id", "user_id"]);
     })
@@ -116,17 +117,40 @@ exports.up = function (knex) {
       table.timestamp("expires_at").notNullable();
       table.boolean("used").defaultTo(false);
       table.timestamp("created_at").defaultTo(knex.fn.now());
+    })
+    .createTable("notifications", (table) => {
+      table.uuid("id").primary().defaultTo(knex.raw("gen_random_uuid()"));
+
+      table
+        .uuid("user_id")
+        .notNullable()
+        .references("id")
+        .inTable("users")
+        .onDelete("CASCADE");
+
+      table.string("title", 120).notNullable();
+      table.text("message").notNullable();
+      table.boolean("is_read").notNullable().defaultTo(false);
+      table
+        .timestamp("created_at", { useTz: true })
+        .notNullable()
+        .defaultTo(knex.fn.now());
+      table
+        .timestamp("updated_at", { useTz: true })
+        .notNullable()
+        .defaultTo(knex.fn.now());
     });
 };
 
 exports.down = function (knex) {
   return knex.schema
-    .dropTableIfExists("otp_verifications")
     .dropTableIfExists("job_applications")
     .dropTableIfExists("jobs")
     .dropTableIfExists("companies")
+    .dropTableIfExists("notifications")
+    .dropTableIfExists("password_reset_tokens")
     .dropTableIfExists("alumni_profiles")
     .dropTableIfExists("student_profiles")
-    .dropTableIfExists("password_reset_tokens")
+    .dropTableIfExists("otp_verifications")
     .dropTableIfExists("users");
 };
