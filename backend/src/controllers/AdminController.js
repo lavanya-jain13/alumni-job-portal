@@ -8,7 +8,7 @@ const notifyUser = async (email, subject, message) => {
     await sendEmail({
       to: email,
       subject,
-      html: <p>${message}</p>,
+      html: `${message}`,
       text: message,
     });
   } catch (err) {

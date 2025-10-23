@@ -192,7 +192,7 @@ const registerAlumni = async (req, res) => {
 
   // ✅ Enforce business/company email
   const corporateDomains = [
-    "gmail.com",
+    // "gmail.com",
     "yahoo.com",
     "outlook.com",
     "hotmail.com",

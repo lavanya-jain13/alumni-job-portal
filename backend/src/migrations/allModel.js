@@ -41,9 +41,10 @@ exports.up = function (knex) {
       table.timestamp("created_at").defaultTo(knex.fn.now());
     })
     .createTable("companies", (table) => {
+      table.uuid("id").primary().defaultTo(knex.raw("gen_random_uuid()"));
       table
         .uuid("alumni_id")
-        .primary()
+        .notNullable()
         .references("id")
         .inTable("alumni_profiles")
         .onDelete("CASCADE");
@@ -67,7 +68,7 @@ exports.up = function (knex) {
       table
         .uuid("company_id")
         .notNullable()
-        .references("alumni_id")
+        .references("id")
         .inTable("companies")
         .onDelete("CASCADE");
       table
