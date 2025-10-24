@@ -6,6 +6,7 @@ const crypto = require("crypto");
 
 const SECRET_KEY = "your_jwt_secret";
 
+// ==================== REGISTER STUDENT ====================
 const registerStudent = async (req, res) => {
   try {
     const { name, role, email, password_hash, branch, gradYear, student_id } =
@@ -82,74 +83,6 @@ const registerStudent = async (req, res) => {
     res.status(500).json({ error: "An error occurred during registration." });
   }
 };
-
-// ==================== REGISTER STUDENT ====================
-// const registerStudent = async (req, res) => {
-//   const {
-//     name,
-//     role,
-//     email,
-//     password_hash,
-//     branch,
-//     gradYear,
-//     student_id,
-//     user_id,
-//   } = req.body;
-
-//   if (
-//     !name ||
-//     !email ||
-//     !password_hash ||
-//     !branch ||
-//     !gradYear ||
-//     !student_id ||
-//     !user_id
-//   ) {
-//     return res.status(400).json({ error: "All fields are required" });
-//   }
-
-//   if (email.split("@")[1] !== "sgsits.ac.in") {
-//     return res.status(400).json({ error: "Email is not authorised" });
-//   }
-//   // change h isme
-//   const validBranches = [
-//     "computer science",
-//     "information technology",
-//     "electronics and telecommunication",
-//     "electronics and instrumentation",
-//     "electrical",
-//     "mechanical",
-//     "civil",
-//     "industrial production",
-//   ];
-
-//   function isValidBranch(branch) {
-//     return validBranches.some((validBranch) =>
-//       new RegExp(`^${validBranch}$`, "i").test(branch)
-//     );
-//   }
-
-//   if (!isValidBranch(branch)) {
-//     return res.status(400).json({ error: "Branch is incorrect" });
-//   }
-
-//   const hashedPassword = await bcrypt.hash(password_hash, 10);
-//   await db("users").insert({
-//     email,
-//     password_hash: hashedPassword,
-//     role,
-//   });
-
-//   await db("student_profiles").insert({
-//     name,
-//     user_id,
-//     student_id,
-//     branch,
-//     grad_year: gradYear,
-//   });
-
-//   res.status(201).json({ message: "User registered successfully" });
-// };
 
 // // ==================== LOGIN ====================
 const login = async (req, res) => {
@@ -272,13 +205,13 @@ const sendEmail = async (to, subject, text) => {
   const transporter = nodemailer.createTransport({
     service: "Gmail",
     auth: {
-      user: "deepslava13@gmail.com",
-      pass: "hkmh eyon tikk yzpb",
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
     },
   });
 
   await transporter.sendMail({
-    from: "deepslava13@gmail.com",
+    from: process.env.EMAIL_USER,
     to,
     subject,
     text,
@@ -286,7 +219,6 @@ const sendEmail = async (to, subject, text) => {
 };
 
 // ==================== FORGOT PASSWORD: GENERATE OTP ====================
-
 const forgotPasswordGenerateOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -337,7 +269,6 @@ const forgotPasswordGenerateOtp = async (req, res) => {
 };
 
 // // ==================== RESET PASSWORD WITH OTP ====================
-
 const resetPasswordWithOTP = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
@@ -428,7 +359,35 @@ const verifyEmailWithOTP = async (req, res) => {
   }
 };
 
-//we need to make an api for logout too
+// ================== Logout ==================
+const logout = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(400).json({ error: "No token provided" });
+    }
+
+    // Optional: verify the token before logout (for safety)
+    try {
+      jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    // Since JWTs are stateless, you can't actually invalidate it on the server
+    // unless you use a blacklist table or cache (e.g., Redis).
+    // For now, just instruct the client to delete it.
+
+    res.status(200).json({
+      success: true,
+      message: "Logout successful.",
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({ error: "Server error during logout" });
+  }
+};
 
 module.exports = {
   registerStudent,
@@ -438,4 +397,5 @@ module.exports = {
   resetPasswordWithOTP,
   generateEmailVerificationOTP,
   verifyEmailWithOTP,
+  logout,
 };

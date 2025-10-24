@@ -7,8 +7,10 @@ const {
   forgotPasswordGenerateOtp,
   resetPasswordWithOTP,
   generateEmailVerificationOTP,
-  verifyEmailWithOTP
+  verifyEmailWithOTP,
+  logout
 } = require("../controllers/AuthController");
+const { authenticate } = require("../middleware/authMiddleware");
 
 // ==================== AUTH ROUTES ====================
 
@@ -32,5 +34,9 @@ router.post("/email/send-otp", generateEmailVerificationOTP);
 
 // Verify email with OTP
 router.post("/email/verify-otp", verifyEmailWithOTP);
+
+
+//logout 
+router.post("/logout", authenticate, logout);
 
 module.exports = router;

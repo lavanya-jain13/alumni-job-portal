@@ -1,93 +1,92 @@
-// src/controllers/UtilityController.js
+// controllers/UtilityController.js
 const db = require("../config/db");
 
-// ================== Notifications ==================
-
-// GET /notifications - Get own notifications
-exports.getNotifications = async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    const notifications = await db("notifications")
-      .where({ user_id: userId })
-      .orderBy("created_at", "desc");
-
-    res.json({ success: true, data: notifications });
-  } catch (error) {
-    console.error("Error fetching notifications:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-// PUT /notifications/:id/read - Mark notification as read
-exports.markNotificationRead = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
-
-    const notification = await db("notifications")
-      .where({ id, user_id: userId })
-      .first();
-
-    if (!notification) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Notification not found" });
-    }
-
-    await db("notifications")
-      .where({ id })
-      .update({ is_read: true, updated_at: new Date() });
-
-    res.json({ success: true, message: "Notification marked as read" });
-  } catch (error) {
-    console.error("Error updating notification:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
-// ================== Search / Filters ==================
-
-// GET /search/students - Search students
+// GET /search/students?name=&branch=&year=&page=&limit=
 exports.searchStudents = async (req, res) => {
   try {
-    const { name, branch, year } = req.query;
+    const { name, branch, year, page = 1, limit = 20 } = req.query;
 
-    let query = db("students").select("id", "name", "email", "branch", "year");
+    const q = db("student_profiles as sp")
+      .join("users as u", "sp.user_id", "u.id")
+      .select(
+        "sp.id",
+        "sp.name",
+        "u.email",
+        "sp.student_id",
+        "sp.branch",
+        "sp.grad_year",
+        "sp.skills",
+        "sp.resume_url",
+        "sp.created_at"
+      );
 
-    if (name) query = query.whereILike("name", `%${name}%`);
-    if (branch) query = query.where("branch", branch);
-    if (year) query = query.where("year", year);
+    if (name) q.whereILike("sp.name", `%${name}%`);
+    if (branch) q.where("sp.branch", branch);
+    if (year) q.where("sp.grad_year", Number(year));
 
-    const students = await query;
+    // pagination + sorting (newest first)
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const offset = (pageNum - 1) * pageSize;
 
-    res.json({ success: true, data: students });
+    const [data, [{ count }]] = await Promise.all([
+      q.clone().orderBy("sp.created_at", "desc").limit(pageSize).offset(offset),
+      q.clone().clearSelect().count({ count: "*" })
+    ]);
+
+    res.json({
+      success: true,
+      page: pageNum,
+      limit: pageSize,
+      total: Number(count),
+      data
+    });
   } catch (error) {
     console.error("Error searching students:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// GET /search/alumni - Search alumni
+// GET /search/alumni?name=&company=&year=&page=&limit=
 exports.searchAlumni = async (req, res) => {
   try {
-    const { name, company, year } = req.query;
+    const { name, company, year, page = 1, limit = 20 } = req.query;
 
-    let query = db("alumni").select(
-      "id",
-      "name",
-      "email",
-      "company",
-      "graduation_year"
-    );
+    const q = db("alumni_profiles as ap")
+      .join("users as u", "ap.user_id", "u.id")
+      .leftJoin("companies as c", "ap.id", "c.alumni_id")
+      .select(
+        "ap.id",
+        "ap.name",
+        "u.email",
+        "ap.grad_year",
+        "ap.current_title",
+        "ap.created_at",
+        db.raw("c.name as company"),
+        "c.industry",
+        "c.website"
+      );
 
-    if (name) query = query.whereILike("name", `%${name}%`);
-    if (company) query = query.whereILike("company", `%${company}%`);
-    if (year) query = query.where("graduation_year", year);
+    if (name) q.whereILike("ap.name", `%${name}%`);
+    if (company) q.whereILike("c.name", `%${company}%`);
+    if (year) q.where("ap.grad_year", Number(year));
 
-    const alumni = await query;
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const offset = (pageNum - 1) * pageSize;
 
-    res.json({ success: true, data: alumni });
+    const [data, [{ count }]] = await Promise.all([
+      q.clone().orderBy("ap.created_at", "desc").limit(pageSize).offset(offset),
+      q.clone().clearSelect().count({ count: "*" })
+    ]);
+
+    res.json({
+      success: true,
+      page: pageNum,
+      limit: pageSize,
+      total: Number(count),
+      data
+    });
   } catch (error) {
     console.error("Error searching alumni:", error);
     res.status(500).json({ success: false, message: "Server error" });

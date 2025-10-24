@@ -1,35 +1,23 @@
-// src/routes/UtilityRoutes.js
 const express = require("express");
 const router = express.Router();
-const UtilityController = require("../controllers/UtilityController");
-const {authenticate, isAdmin} = require("../middleware/authMiddleware"); // ensures user is logged in
+const utilityController = require("../controllers/UtilityController");
+const { authenticate } = require("../middleware/authMiddleware");
+const authorizeRoles = require("../middleware/roleMiddleware");
 
-// ================== Notifications ==================
 
-// GET /notifications - Get logged-in user's notifications
-router.get(
-  "/notifications",
-  authenticate,
-  UtilityController.getNotifications
-);
-
-// PUT /notifications/:id/read - Mark a notification as read
-router.put(
-  "/notifications/:id/read",
-  authenticate,
-  UtilityController.markNotificationRead
-);
-
-// ================== Search / Filters ==================
-
-// GET /search/students - Search students
+// Allow both students and alumni (and admin) to search
 router.get(
   "/search/students",
   authenticate,
-  UtilityController.searchStudents
+  authorizeRoles("student", "alumni", "admin"),
+  utilityController.searchStudents
 );
 
-// GET /search/alumni - Search alumni
-router.get("/search/alumni", authenticate, UtilityController.searchAlumni);
+router.get(
+  "/search/alumni",
+  authenticate,
+  authorizeRoles("student", "alumni", "admin"),
+  utilityController.searchAlumni
+);
 
 module.exports = router;

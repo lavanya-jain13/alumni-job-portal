@@ -1,8 +1,7 @@
-// ...existing code...
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 
-const host = process.env.EMAIL_HOST || "smtp.gmail.com";
+const host = process.env.EMAIL_HOST;
 const port = Number(process.env.EMAIL_PORT || 587);
 const user = process.env.EMAIL_USER; // from .env
 const pass = process.env.EMAIL_PASS; // from .env
@@ -64,4 +63,3 @@ const sendEmail = async (...args) => {
 };
 
 module.exports = { sendEmail };
-// ...existing code...

@@ -1,5 +1,3 @@
-// Update with your config settings.
-
 const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") }); // ← path to backend/.env
 
@@ -19,9 +17,9 @@ module.exports = {
   development: {
     client: "postgresql",
     connection: {
-      database: "alumniPortal",
+      database:"alumniPortal",
       user: "postgres",
-      password: "abhishek",
+      password: "aryanagrawal_92",
     },
     pool: {
       min: 2,

@@ -8,7 +8,7 @@ const authenticate = (req, res, next) => {
 
   try {
     // 👇 use the same secret string you used in the controller
-    const decoded = jwt.verify(token, "your_jwt_secret");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch (err) {
