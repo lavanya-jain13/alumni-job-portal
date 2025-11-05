@@ -360,28 +360,13 @@ const verifyEmailWithOTP = async (req, res) => {
 };
 
 // ================== Logout ==================
+
 const logout = async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
-
-    if (!token) {
-      return res.status(400).json({ error: "No token provided" });
-    }
-
-    // Optional: verify the token before logout (for safety)
-    try {
-      jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ error: "Invalid or expired token" });
-    }
-
-    // Since JWTs are stateless, you can't actually invalidate it on the server
-    // unless you use a blacklist table or cache (e.g., Redis).
-    // For now, just instruct the client to delete it.
-
+    // In stateless JWT auth, logout is handled on frontend side
     res.status(200).json({
       success: true,
-      message: "Logout successful.",
+      message: "Logout successful. Please delete the token on client-side.",
     });
   } catch (error) {
     console.error("Logout error:", error);
