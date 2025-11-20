@@ -1,5 +1,5 @@
-// src/controllers/StudentController.js
 const db = require("../config/db");
+const cloudinary = require("../config/cloudinary");
 
 // helper: support both { userId } and { id } in JWT
 const getUserIdFromReq = (req) => req?.user?.userId || req?.user?.id;
@@ -12,8 +12,6 @@ const normalizeSkills = (skills) => {
 
 /**
  * GET /student/profile
- * Fetch the logged-in student's profile (if exists).
- * 200: { exists: boolean, profile: {...} | null }
  */
 const getMyProfile = async (req, res) => {
   try {
@@ -36,17 +34,7 @@ const getMyProfile = async (req, res) => {
 
 /**
  * PUT /student/profile
- * Upsert behavior:
- *  - If profile exists => partial update allowed
- *  - If profile doesn't exist => requires minimal fields to create (name, studentId, branch, gradYear)
- *
- * Body fields (all optional for update):
- *  - name: string
- *  - studentId: string
- *  - branch: string
- *  - gradYear: number
- *  - skills: string | string[]   (stored as comma-separated text)
- *  - resumeUrl: string (URL)
+ * Create/update student profile + upload resume
  */
 const upsertProfile = async (req, res) => {
   try {
@@ -55,6 +43,38 @@ const upsertProfile = async (req, res) => {
 
     const { name, studentId, branch, gradYear, skills, resumeUrl } =
       req.body || {};
+
+    let finalResumeUrl = resumeUrl || null;
+
+    // =========================================================
+    //   RESUME UPLOAD (PDF / DOC / DOCX) VIA CLOUDINARY
+    // =========================================================
+    if (req.file) {
+      console.log("Uploading resume to Cloudinary...");
+
+      const uploadPromise = new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: "student_resumes",
+            resource_type: "raw",
+          },
+          (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          }
+        );
+
+        uploadStream.end(req.file.buffer);
+      });
+
+      try {
+        const uploaded = await uploadPromise;
+        finalResumeUrl = uploaded.secure_url;
+      } catch (err) {
+        console.error("Resume upload failed:", err);
+        return res.status(500).json({ error: "Resume upload failed" });
+      }
+    }
 
     const existing = await db("student_profiles")
       .where({ user_id: userId })
@@ -67,11 +87,11 @@ const upsertProfile = async (req, res) => {
       ...(branch !== undefined && { branch }),
       ...(gradYear !== undefined && { grad_year: Number(gradYear) }),
       ...(skills !== undefined && { skills: normalizeSkills(skills) }),
-      ...(resumeUrl !== undefined && { resume_url: resumeUrl }),
+      ...(finalResumeUrl !== undefined && { resume_url: finalResumeUrl }),
     };
 
+    // If profile EXISTS → update
     if (existing) {
-      // UPDATE (edit / completion continued)
       if (Object.keys(patch).length === 0) {
         return res.status(400).json({ error: "No fields provided to update" });
       }
@@ -80,12 +100,14 @@ const upsertProfile = async (req, res) => {
       const updated = await db("student_profiles")
         .where({ user_id: userId })
         .first();
-      return res
-        .status(200)
-        .json({ message: "Profile updated successfully", profile: updated });
+
+      return res.status(200).json({
+        message: "Profile updated successfully",
+        profile: updated,
+      });
     }
 
-    // CREATE (first-time completion) — enforce minimal required fields
+    // If profile DOES NOT EXIST → CREATE new
     const missing = [];
     if (!name) missing.push("name");
     if (!studentId) missing.push("studentId");
@@ -112,16 +134,18 @@ const upsertProfile = async (req, res) => {
       branch,
       grad_year: Number(gradYear),
       skills: normalizeSkills(skills) || null,
-      resume_url: resumeUrl || null,
+      resume_url: finalResumeUrl || null,
     };
 
     await db("student_profiles").insert(insertRow);
     const created = await db("student_profiles")
       .where({ user_id: userId })
       .first();
-    return res
-      .status(201)
-      .json({ message: "Profile created successfully", profile: created });
+
+    return res.status(201).json({
+      message: "Profile created successfully",
+      profile: created,
+    });
   } catch (error) {
     console.error("Upsert Student Profile Error:", error);
     return res.status(500).json({ error: "Internal server error" });
