@@ -1,17 +1,15 @@
-// src/routes/studentRoutes.js
 const express = require("express");
 const { getMyProfile, upsertProfile } = require("../controllers/StudentController");
 const { authenticate } = require("../middleware/authMiddleware");
 const roleMiddleware = require("../middleware/roleMiddleware");
 const validate = require("../middleware/validationMiddleware");
 const Joi = require("joi");
+const uploadResume = require("../middleware/resumeUpload");
 
 const router = express.Router();
 
 /**
- * Validation:
- * - GET: no body
- * - PUT: allow partial update; if first-time create, controller enforces required fields
+ * PUT validation schema
  */
 const putProfileSchema = {
   body: Joi.object({
@@ -24,19 +22,20 @@ const putProfileSchema = {
   }),
 };
 
-// GET /student/profile
+// GET student profile
 router.get(
   "/profile",
   authenticate,
-  roleMiddleware("student"),    // remove this if you want alumni/admin to read it too
+  roleMiddleware("student"),
   getMyProfile
 );
 
-// PUT /student/profile (create/update)
+// CREATE / UPDATE student profile + resume
 router.put(
   "/profile",
   authenticate,
-  roleMiddleware("student"),    // remove or widen roles if needed
+  roleMiddleware("student"),
+  uploadResume.single("resume"),   // <---- NEW MIDDLEWARE FOR FILE UPLOAD
   validate(putProfileSchema),
   upsertProfile
 );
