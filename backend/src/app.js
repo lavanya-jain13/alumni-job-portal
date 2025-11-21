@@ -13,6 +13,8 @@ const adminRoutes = require("./Routes/adminRoutes");
 const authUtilityRoutes = require("./Routes/authUtilityRoutes");
 const JobRoutes = require("./Routes/JobRoutes");
 const utilityRoutes = require("./Routes/utilityRoutes");
+const ProjectRoutes = require("./Routes/ProjectRoutes");
+const OtherRoutes = require("./Routes/OtherRoutes");
 
 // const app = require("./app");
 
@@ -34,6 +36,8 @@ app.use("/api/alumni", alumniRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/authUtil", authUtilityRoutes);
 app.use("/api/job", JobRoutes);
+app.use("/api/project", ProjectRoutes);
+app.use("/api/other", OtherRoutes);
 app.use("/api", utilityRoutes);
 
 // ==================== HEALTH CHECK ====================
