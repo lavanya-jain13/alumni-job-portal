@@ -1,563 +1,701 @@
-// const asyncHandler = require("express-async-handler");
-// const Job = require("../models/Job");
-const knex = require("../config/db");
+// src/controllers/jobController.js
 const db = require("../config/db");
+const cloudinary = require("../config/cloudinary");
+const knex = require("../config/db");
 
-//alumni jobs section
+// ---------- Helpers ----------
+
+// upload a buffer (from multer.memoryStorage) to Cloudinary
+const uploadBufferToCloudinary = (buffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+};
+
+// get alumni_profile.id for current user
+const getAlumniProfileByUserId = async (userId) => {
+  return db("alumni_profiles").where({ user_id: userId }).first();
+};
+
+// ensure that current user (alumni) owns this job
+const ensureJobOwnedByAlumniUser = async (jobId, userId) => {
+  const alumniProfile = await getAlumniProfileByUserId(userId);
+  if (!alumniProfile) return null;
+
+  const job = await db("jobs")
+    .where({ id: jobId, alumni_id: alumniProfile.id })
+    .first();
+
+  return job || null;
+};
+
+// ---------------------- ALUMNI SIDE ----------------------
+
+// 1. postJob
 exports.postJob = async (req, res) => {
   try {
-    const userId = req.user?.userId ?? req.user?.id;
-    if (!userId)
-      return res.status(401).json({ error: "Unauthenticated user." });
-
-    // 1) Alumni profile by user
-    const profile = await db("alumni_profiles")
-      .select("id", "grad_year", "current_title")
-      .where({ user_id: userId })
-      .first();
-
-    if (!profile) {
-      return res.status(400).json({
-        error: "Alumni profile not found. Complete your profile first.",
-      });
+    const userId = req.user?.id;
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({ error: "Only alumni can post jobs." });
     }
 
-    // 2) Company for that alumni (companies PK = alumni_id)
+    const alumniProfile = await getAlumniProfileByUserId(userId);
+    if (!alumniProfile) {
+      return res
+        .status(400)
+        .json({ error: "Alumni profile not found. Complete profile first." });
+    }
+
+    // Find company linked to this alumni (simple version: first company)
     const company = await db("companies")
-      .select(
-        "id",
-        "alumni_id",
-        "document_url",
-        "about",
-        "name",
-        "website",
-        "status"
-      )
-      .where({ alumni_id: profile.id })
+      .where({ alumni_id: alumniProfile.id })
       .first();
 
     if (!company) {
       return res.status(400).json({
-        error: "Company info not found. Submit your company details first.",
+        error:
+          "No company found for your profile. Please submit your company details first.",
       });
     }
 
-    // 3) Completion score
-    let completionPercent = 0;
-    if (profile.grad_year) completionPercent += 25;
-    if (profile.current_title) completionPercent += 25;
-    if (company.document_url) completionPercent += 20;
-    if (company.about && company.name && company.website)
-      completionPercent += 30;
+    const {
+      job_title,
+      job_description,
+      job_type,
+      location,
+      salary_range,
+      experience_required,
+      skills_required,
+      stipend,
+      application_deadline,
+      max_applicants_allowed,
+    } = req.body;
 
-    if (completionPercent < 70) {
-      return res.status(400).json({
-        error: "Complete at least 70% of your profile before posting jobs.",
-        completionPercent,
-      });
-    }
-
-    // 4) Validate job input
-    const { job_title, job_description } = req.body;
     if (!job_title || !job_description) {
       return res
         .status(400)
         .json({ error: "job_title and job_description are required." });
     }
 
-    const role = req.user?.role || roleToAssign;
-    console.log("USEr ROLE:", role);
+    const [job] = await db("jobs")
+      .insert(
+        {
+          company_id: company.id,
+          alumni_id: alumniProfile.id,
+          job_title,
+          job_description,
+          job_type: job_type || null,
+          location: location || null,
+          salary_range: salary_range || null,
+          experience_required: experience_required || null,
+          skills_required: skills_required || null,
+          stipend: stipend || null,
+          application_deadline: application_deadline || null,
+          max_applicants_allowed:
+            max_applicants_allowed && Number(max_applicants_allowed) > 0
+              ? Number(max_applicants_allowed)
+              : 50,
+          status: "active",
+        },
+        "*"
+      )
+      .returning("*");
 
-    // 5) Insert job
-    await db("jobs").insert({
-      company_id: company.id, // ✅ references companies.alumni_id
-      posted_by_alumni_id: profile.id, // ✅ references alumni_profiles.id
-      job_title,
-      job_description,
-      created_at: db.fn.now(),
-    });
-
-    return res.json({ message: "Job posted successfully" });
-  } catch (error) {
-    console.error("Post Job Error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return res
+      .status(201)
+      .json({ message: "Job posted successfully.", job: job });
+  } catch (err) {
+    console.error("postJob error:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
+// 2. getMyJobs (alumni)
 exports.getMyJobs = async (req, res) => {
   try {
-    const userId = req.user?.userId ?? req.user?.id;
-    if (!userId)
-      return res.status(401).json({ error: "Unauthenticated user." });
-
-    // 1️⃣ Find the alumni profile linked to this user
-    const profile = await db("alumni_profiles")
-      .select("id")
-      .where({ user_id: userId })
-      .first();
-
-    if (!profile) {
-      return res
-        .status(400)
-        .json({ error: "Alumni profile not found for this user." });
+    const userId = req.user?.id;
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({ error: "Only alumni can view their jobs." });
     }
 
-    // 2️⃣ Fetch jobs posted by this alumni
+    const alumniProfile = await getAlumniProfileByUserId(userId);
+    if (!alumniProfile) {
+      return res
+        .status(400)
+        .json({ error: "Alumni profile not found. Complete profile first." });
+    }
+
     const jobs = await db("jobs")
-      .where({ posted_by_alumni_id: profile.id })
+      .where({ alumni_id: alumniProfile.id })
       .orderBy("created_at", "desc");
 
-    // 3️⃣ Return jobs
-    return res.status(200).json({
-      success: true,
-      count: jobs.length,
-      jobs,
-    });
+    return res.json({ jobs });
   } catch (err) {
     console.error("getMyJobs error:", err);
-    return res.status(500).json({ error: "Server error while fetching jobs" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
+// 3. getJobById (alumni – only own job)
 exports.getJobById = async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { id } = req.params;
-    const userId = req.user?.userId ?? req.user?.id;
 
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthenticated user." });
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({ error: "Only alumni can view this." });
     }
 
-    // 1️⃣ Find the alumni profile for this user
-    const profile = await db("alumni_profiles")
-      .select("id")
-      .where({ user_id: userId })
-      .first();
-
-    if (!profile) {
-      return res
-        .status(400)
-        .json({ error: "Alumni profile not found for this user." });
-    }
-
-    // 2️⃣ Fetch the job only if it belongs to this alumni
-    const job = await db("jobs")
-      .where({
-        id,
-        posted_by_alumni_id: profile.id,
-      })
-      .first();
-
-    if (!job) {
-      return res.status(404).json({ error: "Job not found or unauthorized." });
-    }
-
-    // 3️⃣ Optionally, fetch related company info
-    const company = await db("companies")
-      .select("id", "name", "website", "about")
-      .where({ id: job.company_id })
-      .first();
-
-    return res.status(200).json({
-      success: true,
-      job: {
-        ...job,
-        company,
-      },
-    });
-  } catch (err) {
-    console.error("getJobById error:", err);
-    res.status(500).json({ error: "Server error while fetching job" });
-  }
-};
-
-exports.updateJob = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user?.userId ?? req.user?.id;
-
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthenticated user." });
-    }
-
-    // 1️⃣ Find alumni profile for this user
-    const profile = await db("alumni_profiles")
-      .select("id")
-      .where({ user_id: userId })
-      .first();
-
-    if (!profile) {
-      return res
-        .status(400)
-        .json({ error: "Alumni profile not found for this user." });
-    }
-
-    // 2️⃣ Extract only allowed fields for update
-    const { job_title, job_description } = req.body;
-    const updateData = {};
-
-    if (job_title) updateData.job_title = job_title;
-    if (job_description) updateData.job_description = job_description;
-
-    if (Object.keys(updateData).length === 0) {
-      return res
-        .status(400)
-        .json({ error: "At least one field (job_title/job_description) required to update." });
-    }
-
-    // 3️⃣ Ensure this job belongs to the logged-in alumni
-    const job = await db("jobs")
-      .where({ id, posted_by_alumni_id: profile.id })
-      .first();
-
+    const job = await ensureJobOwnedByAlumniUser(id, userId);
     if (!job) {
       return res
         .status(404)
-        .json({ error: "Job not found or unauthorized to update." });
+        .json({ error: "Job not found or not owned by you." });
     }
 
-    // 4️⃣ Update job record
-    await db("jobs")
-      .where({ id })
-      .update(updateData);
-
-    return res.status(200).json({ message: "Job updated successfully" });
+    return res.json({ job });
   } catch (err) {
-    console.error("Update Job Error:", err);
-    return res.status(500).json({ error: "Internal server error while updating job." });
+    console.error("getJobById error:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
+// 4. updateJob
+exports.updateJob = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({ error: "Only alumni can update jobs." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(id, userId);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ error: "Job not found or not owned by you." });
+    }
+
+    const updateData = { ...req.body, updated_at: db.fn.now() };
+
+    // don't allow changing ids
+    delete updateData.id;
+    delete updateData.company_id;
+    delete updateData.alumni_id;
+
+    await db("jobs").where({ id }).update(updateData);
+
+    const updated = await db("jobs").where({ id }).first();
+    return res.json({ message: "Job updated successfully.", job: updated });
+  } catch (err) {
+    console.error("updateJob error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 5. deleteJob
 exports.deleteJob = async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { id } = req.params;
-    const userId = req.user?.userId ?? req.user?.id;
 
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthenticated user." });
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({ error: "Only alumni can delete jobs." });
     }
 
-    // 1) Get this user's alumni profile (jobs use alumni_profiles.id)
-    const profile = await db("alumni_profiles")
-      .select("id")
-      .where({ user_id: userId })
+    const job = await ensureJobOwnedByAlumniUser(id, userId);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ error: "Job not found or not owned by you." });
+    }
+
+    await db("jobs").where({ id }).del();
+    return res.json({ message: "Job deleted successfully." });
+  } catch (err) {
+    console.error("deleteJob error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 6. repostJob (set status active, optionally change max_applicants_allowed)
+exports.repostJob = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const { max_applicants_allowed } = req.body;
+
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({ error: "Only alumni can repost jobs." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(id, userId);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ error: "Job not found or not owned by you." });
+    }
+
+    const updateObj = {
+      status: "active",
+      updated_at: db.fn.now(),
+    };
+
+    if (max_applicants_allowed && Number(max_applicants_allowed) > 0) {
+      updateObj.max_applicants_allowed = Number(max_applicants_allowed);
+    }
+
+    await db("jobs").where({ id }).update(updateObj);
+
+    const updated = await db("jobs").where({ id }).first();
+    return res.json({ message: "Job reposted.", job: updated });
+  } catch (err) {
+    console.error("repostJob error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 7. getJobApplicationsCount (per job)
+exports.getJobApplicationsCount = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { jobId } = req.params;
+
+    if (!userId || req.user.role !== "alumni") {
+      return res
+        .status(403)
+        .json({ error: "Only alumni can view application counts." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(jobId, userId);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ error: "Job not found or not owned by you." });
+    }
+
+    const row = await db("job_applications")
+      .where({ job_id: jobId })
+      .count("* as count")
       .first();
 
-    if (!profile) {
-      return res.status(400).json({ error: "Alumni profile not found for this user." });
-    }
-
-    // 2) Delete only if the job belongs to this alumni
-    const deleted = await db("jobs")
-      .where({ id, posted_by_alumni_id: profile.id })
-      .del();
-
-    if (!deleted) {
-      return res.status(404).json({ error: "Job not found or unauthorized to delete." });
-    }
-
-    return res.status(200).json({ message: "Job deleted successfully" });
+    return res.json({ jobId, totalApplications: Number(row?.count || 0) });
   } catch (err) {
-    console.error("Delete Job Error:", err);
-    return res
-      .status(500)
-      .json({ error: "Internal server error while deleting job." });
+    console.error("getJobApplicationsCount error:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
-//student jobs section 
-
-exports.getAllJobsStudent = async (req, res) => {
+// 8. getJobUnreadApplicationsCount
+exports.getJobUnreadApplicationsCount = async (req, res) => {
   try {
-    // ✅ Fetch all jobs, joining with company & alumni info for context
-    const jobs = await db("jobs as j")
-      .leftJoin("companies as c", "j.company_id", "c.id")
-      .leftJoin("alumni_profiles as a", "j.posted_by_alumni_id", "a.id")
-      .select(
-        "j.id as job_id",
-        "j.job_title",
-        "j.job_description",
-        "j.created_at",
-        "c.name as company_name",
-        "c.website as company_website",
-        "c.about as company_about",
-        "a.name as alumni_name",
-        "a.current_title as alumni_designation",
-        "a.grad_year as alumni_grad_year"
-      )
-      .orderBy("j.created_at", "desc");
+    const userId = req.user?.id;
+    const { jobId } = req.params;
 
-    return res.status(200).json({
-      success: true,
-      count: jobs.length,
-      jobs,
+    if (!userId || req.user.role !== "alumni") {
+      return res
+        .status(403)
+        .json({ error: "Only alumni can view unread application counts." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(jobId, userId);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ error: "Job not found or not owned by you." });
+    }
+
+    const row = await db("job_applications")
+      .where({ job_id: jobId, is_read: false })
+      .count("* as count")
+      .first();
+
+    return res.json({ jobId, unreadApplications: Number(row?.count || 0) });
+  } catch (err) {
+    console.error("getJobUnreadApplicationsCount error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 9. viewJobApplicants (detailed list)
+exports.viewJobApplicants = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { jobId } = req.params;
+
+    if (!userId || req.user.role !== "alumni") {
+      return res
+        .status(403)
+        .json({ error: "Only alumni can view applicants." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(jobId, userId);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ error: "Job not found or not owned by you." });
+    }
+
+    const applicants = await db("job_applications as ja")
+      .join("users as u", "ja.user_id", "u.id")
+      .leftJoin("student_profiles as sp", "sp.user_id", "u.id")
+      .where("ja.job_id", jobId)
+      .select(
+        "ja.id as application_id",
+        "ja.status as application_status",
+        "ja.is_read",
+        "ja.resume_url",
+        "ja.applied_at",
+        "u.id as user_id",
+        "u.email as user_email",
+        "sp.name as student_name",
+        "sp.branch as student_branch",
+        "sp.grad_year as student_grad_year"
+      )
+      .orderBy("ja.applied_at", "desc");
+
+    return res.json({ jobId, applicants });
+  } catch (err) {
+    console.error("viewJobApplicants error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 10. markJobApplicationRead
+exports.markJobApplicationRead = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { applicationId } = req.params;
+
+    if (!userId || req.user.role !== "alumni") {
+      return res
+        .status(403)
+        .json({ error: "Only alumni can mark applications as read." });
+    }
+
+    const application = await db("job_applications")
+      .where({ id: applicationId })
+      .first();
+
+    if (!application) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(application.job_id, userId);
+    if (!job) {
+      return res
+        .status(403)
+        .json({ error: "You are not authorized to modify this job." });
+    }
+
+    await db("job_applications")
+      .where({ id: applicationId })
+      .update({ is_read: true });
+
+    return res.json({ message: "Application marked as read." });
+  } catch (err) {
+    console.error("markJobApplicationRead error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 11–13. accept / reject / hold job application
+const updateJobApplicationStatus = async (req, res, newStatus) => {
+  try {
+    const userId = req.user?.id;
+    const { applicationId } = req.params;
+
+    if (!userId || req.user.role !== "alumni") {
+      return res.status(403).json({
+        error: "Only alumni can change job application status.",
+      });
+    }
+
+    const application = await db("job_applications")
+      .where({ id: applicationId })
+      .first();
+
+    if (!application) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    const job = await ensureJobOwnedByAlumniUser(application.job_id, userId);
+    if (!job) {
+      return res
+        .status(403)
+        .json({ error: "You are not authorized to modify this job." });
+    }
+
+    await db("job_applications")
+      .where({ id: applicationId })
+      .update({ status: newStatus, is_read: true });
+
+    return res.json({
+      message: Application marked as ${newStatus}.,
     });
   } catch (err) {
-    console.error("getAllJobsStudent error:", err);
-    res.status(500).json({ error: "Server error while fetching all jobs" });
+    console.error("updateJobApplicationStatus error:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
+exports.acceptJobApplication = (req, res) =>
+  updateJobApplicationStatus(req, res, "accepted");
+
+exports.rejectJobApplication = (req, res) =>
+  updateJobApplicationStatus(req, res, "rejected");
+
+exports.holdJobApplication = (req, res) =>
+  updateJobApplicationStatus(req, res, "on_hold");
+
+// ---------------------- STUDENT SIDE ----------------------
+
+// 14. getAllJobsStudent
+exports.getAllJobsStudent = async (req, res) => {
+  try {
+    const jobs = await db("jobs")
+      .where("status", "active")
+      .orderBy("created_at", "desc");
+
+    return res.json({ jobs });
+  } catch (err) {
+    console.error("getAllJobsStudent error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 15. getJobByIdStudent
 exports.getJobByIdStudent = async (req, res) => {
   try {
     const { id } = req.params;
+    const job = await db("jobs").where({ id }).first();
 
-    // 1️⃣ Fetch job + company + alumni details
-    const job = await db("jobs as j")
-      .leftJoin("companies as c", "j.company_id", "c.id")
-      .leftJoin("alumni_profiles as a", "j.posted_by_alumni_id", "a.id")
-      .select(
-        "j.id as job_id",
-        "j.job_title",
-        "j.job_description",
-        "j.created_at",
-        "c.id as company_id",
-        "c.name as company_name",
-        "c.website as company_website",
-        "c.about as company_about",
-        "a.id as alumni_profile_id",
-        "a.name as alumni_name",
-        "a.current_title as alumni_designation",
-        "a.grad_year as alumni_grad_year"
-      )
-      .where("j.id", id)
-      .first();
-
-    // 2️⃣ Handle missing job
     if (!job) {
-      return res.status(404).json({ error: "Job not found" });
+      return res.status(404).json({ error: "Job not found." });
     }
 
-    // 3️⃣ Send result
-    return res.status(200).json({
-      success: true,
-      job,
-    });
+    return res.json({ job });
   } catch (err) {
     console.error("getJobByIdStudent error:", err);
-    return res.status(500).json({ error: "Server error while fetching job details" });
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
+// 16. applyJob (with Cloudinary resume upload)
 exports.applyJob = async (req, res) => {
-  const userId = req.user?.userId ?? req.user?.id;
-  if (!userId) return res.status(401).json({ error: "Unauthenticated user." });
+  const userId = req.user?.id;
+  const { job_id } = req.body;
 
-  const job_id = req.body.job_id || req.body.jobId;
-  const resume_url = req.body.resume_url || null;
-  if (!job_id) return res.status(400).json({ error: "job_id is required" });
+  if (!userId || req.user.role !== "student") {
+    return res.status(403).json({ error: "Only students can apply to jobs." });
+  }
+
+  if (!job_id) {
+    return res.status(400).json({ error: "job_id is required." });
+  }
 
   try {
-    await db.transaction(async (trx) => {
-      // 1) Ensure the job exists
-      const job = await trx("jobs").select("id").where({ id: job_id }).first();
-      if (!job) throw { status: 404, message: "Job not found" };
+    // 1) Fetch job
+    const job = await db("jobs").where({ id: job_id }).first();
+    if (!job) {
+      return res.status(404).json({ error: "Job not found." });
+    }
 
-      // 2) Capacity check based on current applications count
-      const countRow = await trx("job_applications")
-        .where({ job_id })
-        .count("* as c")
-        .first();
-      const currentCount = Number(countRow?.c || 0);
-      if (currentCount >= 50) {
-        throw { status: 400, message: "Applications are closed for this job (capacity reached)." };
-      }
-
-      // 3) Prevent duplicate application by same user
-      const already = await trx("job_applications")
-        .where({ job_id, user_id: userId })
-        .first();
-      if (already) throw { status: 400, message: "Already applied for this job" };
-
-      // 4) Insert the application
-      await trx("job_applications").insert({
-        job_id,
-        user_id: userId,
-        resume_url,
-        applied_at: trx.fn.now(),
+    // 2) Check job status
+    if (job.status !== "active") {
+      return res.status(400).json({
+        error: This job is currently ${job.status} and cannot accept new applications.,
       });
+    }
 
-      // 5) Recompute + write back the total into job_applications."No_of_applicants"
+    // 3) Current applications count
+    const countRow = await db("job_applications")
+      .where({ job_id })
+      .count("id as count")
+      .first();
+    const currentCount = Number(countRow?.count || 0);
+
+    if (currentCount >= job.max_applicants_allowed) {
+      return res.status(400).json({
+        error: "Application limit reached for this job.",
+      });
+    }
+
+    // 4) Check duplicate application
+    const existing = await db("job_applications")
+      .where({ job_id, user_id: userId })
+      .first();
+    if (existing) {
+      return res
+        .status(400)
+        .json({ error: "You have already applied to this job." });
+    }
+
+    // 5) Handle resume upload
+    let resumeUrl = null;
+    if (req.file && req.file.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "alumni-portal/resumes"
+      );
+      resumeUrl = uploadResult.secure_url;
+    } else if (req.body.resume_url) {
+      resumeUrl = req.body.resume_url;
+    } else {
+      return res
+        .status(400)
+        .json({ error: "Resume file (resume) is required." });
+    }
+
+    // 6) Do everything in a transaction
+    const application = await db.transaction(async (trx) => {
+      const [app] = await trx("job_applications")
+        .insert(
+          {
+            job_id,
+            user_id: userId,
+            resume_url: resumeUrl,
+            status: "pending",
+            is_read: false,
+          },
+          ["id", "job_id", "user_id", "resume_url", "status", "applied_at"]
+        )
+        .catch((err) => {
+          if (err.code === "23505") {
+            throw new Error("You have already applied to this job.");
+          }
+          throw err;
+        });
+
+      // recalc count and pause if needed
       const newCountRow = await trx("job_applications")
         .where({ job_id })
-        .count("* as c")
+        .count("id as count")
         .first();
-      const newCount = Number(newCountRow?.c || 0);
+      const newCount = Number(newCountRow?.count || 0);
 
-      // Use raw to be safe with the mixed-case column name
-      await trx.raw(
-        'UPDATE job_applications SET "No_of_applicants" = ? WHERE job_id = ?',
-        [newCount, job_id]
-      );
+      if (newCount >= job.max_applicants_allowed) {
+        await trx("jobs")
+          .where({ id: job_id })
+          .update({ status: "paused", updated_at: trx.fn.now() });
+      }
+
+      return app;
     });
 
-    return res.status(201).json({ message: "Job application submitted" });
+    return res.status(201).json({
+      message: "Job application submitted successfully.",
+      application,
+    });
   } catch (err) {
-    if (err && err.status) return res.status(err.status).json({ error: err.message });
-    if (err && err.code === "23505") {
-      return res.status(409).json({ error: "Already applied for this job" });
-    }
     console.error("applyJob error:", err);
-    return res.status(500).json({ error: "Server error while applying to job" });
+    if (err.message === "You have already applied to this job.") {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: "Server error" });
   }
 };
 
+// 17. withdrawJobApplication
+exports.withdrawJobApplication = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { applicationId } = req.params;
+
+    if (!userId || req.user.role !== "student") {
+      return res
+        .status(403)
+        .json({ error: "Only students can withdraw applications." });
+    }
+
+    const application = await db("job_applications")
+      .where({ id: applicationId, user_id: userId })
+      .first();
+
+    if (!application) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    await db("job_applications").where({ id: applicationId }).del();
+
+    return res.json({ message: "Application withdrawn successfully." });
+  } catch (err) {
+    console.error("withdrawJobApplication error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// 18. getAppliedJobs (student)
 exports.getAppliedJobs = async (req, res) => {
   try {
-    const userId = req.user?.userId ?? req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthenticated user." });
+    const userId = req.user?.id;
+
+    if (!userId || req.user.role !== "student") {
+      return res
+        .status(403)
+        .json({ error: "Only students can view their applied jobs." });
     }
 
     const rows = await db("job_applications as ja")
       .join("jobs as j", "ja.job_id", "j.id")
       .leftJoin("companies as c", "j.company_id", "c.id")
       .select(
-        "ja.job_id",
-        "ja.user_id",
-        "ja.resume_url",
-        db.raw('"ja"."No_of_applicants" as no_of_applicants'),
+        "ja.id as application_id",
+        "ja.status as application_status",
         "ja.applied_at",
+        "ja.resume_url",
+        "j.id as job_id",
         "j.job_title",
-        "j.job_description",
-        "j.created_at as job_created_at",
+        "j.location",
+        "j.status as job_status",
         "c.name as company_name",
         "c.website as company_website"
       )
       .where("ja.user_id", userId)
       .orderBy("ja.applied_at", "desc");
 
-    return res.status(200).json({
-      success: true,
-      count: rows.length,
-      applications: rows,
-    });
+    return res.json({ applications: rows });
   } catch (err) {
     console.error("getAppliedJobs error:", err);
-    return res
-      .status(500)
-      .json({ error: "Server error while fetching applied jobs" });
-  }
-};
-
-
-
-//application 
-exports.withdrawApplication = async (req, res) => {
-  try {
-    const userId = req.user?.userId ?? req.user?.id;
-    const { job_id } = req.params; // we'll withdraw by job_id instead of applicationId
-
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthenticated user." });
-    }
-
-    // 1️⃣ Find the application
-    const application = await db("job_applications")
-      .where({ job_id, user_id: userId })
-      .first();
-
-    if (!application) {
-      return res.status(404).json({ error: "Application not found" });
-    }
-
-    // 2️⃣ Start a transaction for consistency
-    await db.transaction(async (trx) => {
-      // Delete the application
-      await trx("job_applications")
-        .where({ job_id, user_id: userId })
-        .del();
-
-      // 3️⃣ Recount remaining applicants for that job
-      const countRow = await trx("job_applications")
-        .where({ job_id })
-        .count("* as c")
-        .first();
-      const updatedCount = Number(countRow?.c || 0);
-
-      // 4️⃣ Update the No_of_applicants column for all remaining rows of that job
-      await trx.raw(
-        'UPDATE job_applications SET "No_of_applicants" = ? WHERE job_id = ?',
-        [updatedCount, job_id]
-      );
-    });
-
-    res.status(200).json({ message: "Application withdrawn successfully" });
-  } catch (err) {
-    console.error("Withdraw application error:", err);
-    res.status(500).json({ error: "Server error while withdrawing application" });
-  }
-};
-
-exports.viewApplicants = async (req, res) => {
-  try {
-    const { jobId } = req.params;
-    const userId = req.user?.userId ?? req.user?.id;
-    const role = (req.user?.role || "").toLowerCase();
-
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthenticated user." });
-    }
-
-    // ---------------------------
-    // Authorization (admin bypass)
-    // ---------------------------
-    if (role === "alumni") {
-      // get this user's alumni_profile id
-      const profile = await db("alumni_profiles")
-        .select("id")
-        .where({ user_id: userId })
-        .first();
-
-      if (!profile) {
-        return res.status(400).json({ error: "Alumni profile not found for this user." });
-      }
-
-      // verify the job is posted by this alumni
-      const ownsJob = await db("jobs")
-        .where({ id: jobId, posted_by_alumni_id: profile.id })
-        .first();
-
-      if (!ownsJob) {
-        return res
-          .status(403)
-          .json({ error: "Not authorized to view applicants of this job" });
-      }
-    }
-    // role === 'admin' → allowed. For other roles, forbid:
-    else if (role !== "admin") {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-
-    // ---------------------------
-    // Fetch applicants
-    // ---------------------------
-    const applicants = await db("job_applications as ja")
-      .join("users as u", "ja.user_id", "u.id")
-      .leftJoin("student_profiles as sp", "sp.user_id", "u.id")
-      .select(
-        "ja.job_id",
-        "ja.user_id as student_user_id",
-        "ja.resume_url",
-        db.raw('"ja"."No_of_applicants" as no_of_applicants'), // mixed-case column
-        "ja.applied_at",
-        "u.email as student_email",
-        "sp.name as student_name",
-        "sp.branch as student_branch",
-        "sp.grad_year as student_grad_year"
-      )
-      .where("ja.job_id", jobId)
-      .orderBy("ja.applied_at", "desc");
-
-    return res.status(200).json({
-      success: true,
-      count: applicants.length,
-      applicants,
-    });
-  } catch (err) {
-    console.error("View applicants error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 };
 
+// 19. checkJobApplicationStatus – has this student already applied?
+exports.checkJobApplicationStatus = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { jobId } = req.params;
 
+    if (!userId || req.user.role !== "student") {
+      return res
+        .status(403)
+        .json({ error: "Only students can check application status." });
+    }
+
+    const app = await db("job_applications")
+      .where({ job_id: jobId, user_id: userId })
+      .first();
+
+    if (!app) {
+      return res.json({ applied: false });
+    }
+
+    return res.json({
+      applied: true,
+      status: app.status,
+      applied_at: app.applied_at,
+    });
+  } catch (err) {
+    console.error("checkJobApplicationStatus error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
