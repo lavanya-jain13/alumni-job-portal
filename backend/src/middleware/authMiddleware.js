@@ -23,4 +23,18 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { authenticate, isAdmin };
+const isAlumni = (req, res, next) => {
+  if (req.user.role !== "alumni") {
+    return res.status(403).json({ error: "Forbidden: Alumni only" });
+  }
+  next();
+};
+
+const isStudent = (req, res, next) => {
+  if (req.user.role !== "student") {
+    return res.status(403).json({ error: "Forbidden: Student only" });
+  }
+  next();
+};
+
+module.exports = { authenticate, isAdmin, isAlumni, isStudent };
