@@ -1,45 +1,167 @@
+// src/Routes/JobRoutes.js
 const express = require("express");
 const router = express.Router();
-const {authenticate } = require("../middleware/authMiddleware");
-// const { authorize } = require("../middleware/roleMiddleware");
+
+const jobController = require("../controllers/JobController");
 const {
-  postJob,
-  getMyJobs,
-  getJobById,
-  updateJob,
-  deleteJob,
-  getAllJobsStudent,
-  getJobByIdStudent,
-  applyJob,
-  getAppliedJobs,
-  withdrawApplication,
-  viewApplicants,
-} = require("../controllers/JobController");
+  authenticate,
+  isAdmin,
+  isAlumni,
+  isStudent,
+} = require("../middleware/authMiddleware");
+const resumeUpload = require("../config/resumeUpload");
 
-// Alumni can post jobs
-// router.post("/", protect, authorize("alumni"), postJob);
+// ================== ALUMNI JOB ROUTES ==================
 
-router.post("/post-job", authenticate, postJob);
-router.get("/get-my-jobs",authenticate, getMyJobs);
-router.get("/get-job-by-id/:id",authenticate, getJobById);
-router.put("/update-job/:id",authenticate,updateJob);
-router.delete("/delete-job/:id",authenticate,deleteJob);
+// 1. Post a new job
+router.post(
+  "/post-job",
+  authenticate,
+  isAlumni,
+  jobController.postJob
+);
 
+// 2. Get jobs posted by logged-in alumni
+router.get(
+  "/my-jobs",
+  authenticate,
+  isAlumni,
+  jobController.getMyJobs
+);
 
-router.get("/get-all-jobs-student",authenticate,getAllJobsStudent);
-router.get("/get-job-by-id-student/:id",authenticate,getJobByIdStudent);
-router.post("/apply-job",authenticate,applyJob);
-router.get("/get-applied-jobs",authenticate,getAppliedJobs);
+// 3. Get single job (only if posted by this alumni)
+router.get(
+  "/job/:id",
+  authenticate,
+  isAlumni,
+  jobController.getJobById
+);
 
+// 4. Update job (only owner alumni)
+router.put(
+  "/job/:id",
+  authenticate,
+  isAlumni,
+  jobController.updateJob
+);
 
-router.delete("/withdraw-application/:job_id", authenticate, withdrawApplication);
-router.get("/view-applicants/:jobId", authenticate, viewApplicants);
+// 5. Delete job (only owner alumni)
+router.delete(
+  "/job/:id",
+  authenticate,
+  isAlumni,
+  jobController.deleteJob
+);
 
+// 6. Repost / change max_applicants_allowed / reactivate
+router.post(
+  "/job/:id/repost",
+  authenticate,
+  isAlumni,
+  jobController.repostJob
+);
 
-// Anyone can view jobs
-// router.get("/", protect, getJobs);
-// router.get("/:id", protect, getJobById);
-// // Admin can delete jobs
-// router.delete("/:id", protect, authorize("admin"), deleteJob);
+// 7. Total applications count for a job
+router.get(
+  "/job/:jobId/applications/count",
+  authenticate,
+  isAlumni,
+  jobController.getJobApplicationsCount
+);
+
+// 8. Unread applications count for a job
+router.get(
+  "/job/:jobId/applications/unread-count",
+  authenticate,
+  isAlumni,
+  jobController.getJobUnreadApplicationsCount
+);
+
+// 9. Detailed applicants list for a job
+router.get(
+  "/job/:jobId/applicants",
+  authenticate,
+  isAlumni,
+  jobController.viewJobApplicants
+);
+
+// 10. Mark a job application as read
+router.patch(
+  "/applications/:applicationId/mark-read",
+  authenticate,
+  isAlumni,
+  jobController.markJobApplicationRead
+);
+
+// 11. Accept job application
+router.patch(
+  "/applications/:applicationId/accept",
+  authenticate,
+  isAlumni,
+  jobController.acceptJobApplication
+);
+
+// 12. Reject job application
+router.patch(
+  "/applications/:applicationId/reject",
+  authenticate,
+  isAlumni,
+  jobController.rejectJobApplication
+);
+
+// 13. Put job application on hold
+router.patch(
+  "/applications/:applicationId/hold",
+  authenticate,
+  isAlumni,
+  jobController.holdJobApplication
+);
+
+// ================== STUDENT JOB ROUTES ==================
+
+// 14. Get all active jobs (student view)
+router.get(
+  "/get-all-jobs-student",
+  jobController.getAllJobsStudent
+);
+
+// 15. Get job details for student
+router.get(
+  "/get-job-by-id-student/:id",
+  jobController.getJobByIdStudent
+);
+
+// 16. Apply to a job (with resume upload)
+router.post(
+  "/apply-job",
+  authenticate,
+  isStudent,
+  resumeUpload.single("resume"), // field name = "resume"
+  jobController.applyJob
+);
+
+// 17. Withdraw job application
+router.delete(
+  "/withdraw-application/:applicationId",
+  authenticate,
+  isStudent,
+  jobController.withdrawJobApplication
+);
+
+// 18. Get all jobs applied by logged-in student
+router.get(
+  "/get-applied-jobs",
+  authenticate,
+  isStudent,
+  jobController.getAppliedJobs
+);
+
+// 19. Check if student has applied to this job + status
+router.get(
+  "/job/:jobId/application-status",
+  authenticate,
+  isStudent,
+  jobController.checkJobApplicationStatus
+);
 
 module.exports = router;
